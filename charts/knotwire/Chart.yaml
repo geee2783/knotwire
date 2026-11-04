@@ -1,0 +1,8 @@
+# Knotwire - GNU AGPL-3.0-only. See LICENSE in the repository root.
+apiVersion: v2
+name: knotwire
+description: Minimal Helm chart for Knotwire (self-hosted open-source CRM; M0 skeleton). PostgreSQL and Redis are expected to be provided externally.
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+dependencies: []

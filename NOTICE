@@ -1,0 +1,16 @@
+Knotwire
+Copyright 2026 The Knotwire authors and contributors.
+
+Licensed under the GNU Affero General Public License v3.0 only
+(see LICENSE).
+
+This project contains no code, documentation, assets, or data copied from
+Kommo CRM or amoCRM (QSOFT LLC) or any other proprietary vendor. Feature
+parity is achieved through an original implementation guided by publicly
+documented APIs and observed public behavior.
+
+Design lessons referenced during planning are listed in docs/adr/; none of
+them are derived from proprietary source.
+
+Third-party dependencies are listed in package-lock.json and retain their
+own licenses (npm registry metadata; run `npm ls --all` after install).

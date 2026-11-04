@@ -1,0 +1,39 @@
+name: knotwire
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every source file carries the AGPL notice
+        run: |
+          set -e
+          files=$(git ls-files '*.ts' '*.js' '*.sql' '*.yaml' '*.yml' Dockerfile NOTICE TRADEMARK.md)
+          for f in $files; do
+            case "$f" in
+              node_modules/*|charts/*/templates/*) continue;;
+            esac
+            grep -q -E 'AGPL|LICENSE' "$f" || { echo "missing notice: $f"; exit 1; }
+          done
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet

@@ -1,0 +1,15 @@
+# Knotwire - GNU AGPL-3.0-only. See LICENSE in the repository root.
+apiVersion: v1
+kind: Service
+metadata:
+  name: knotwire-api
+  labels:
+    app.kubernetes.io/name: knotwire
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: knotwire
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

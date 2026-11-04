@@ -1,0 +1,16 @@
+# Knotwire - GNU AGPL-3.0-only. See LICENSE in the repository root.
+# knotwire
+
+Self-host quickstart (Helm):
+
+1. Create the Secret `knotwire-env` with `DATABASE_URL` and `REDIS_URL`.
+2. `helm install knotwire ./charts/knotwire`
+3. Port-forward: `kubectl port-forward svc/knotwire-api 8080:8080`
+4. Check: `curl localhost:8080/healthz`
+
+PostgreSQL and Redis are not deployed by this chart (M0). A production
+installation should use a managed or self-operated PostgreSQL 16+ with RLS
+migrations applied (`packages/core/migrations/`), and Redis 7+.
+
+Tailscale exposure ships in M6 (`.Values.tailscale`); do not enable until the
+Tailscale profile lands.

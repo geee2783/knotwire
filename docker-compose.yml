@@ -1,0 +1,63 @@
+# Knotwire - GNU AGPL-3.0-only. See LICENSE in the repository root.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: knotwire
+      POSTGRES_USER: knotwire
+      POSTGRES_PASSWORD: knotwire-dev-password  # local dev only; override in real deployments
+    ports:
+      - "5432:5432"
+    volumes:
+      - knotwire-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U knotwire"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["object-storage"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: knotwire
+      MINIO_ROOT_PASSWORD: knotwire-minio-dev-password  # local dev only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - knotwire-miniodata:/data
+
+  knotwire-api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://knotwire:knotwire-dev-password@postgres:5432/knotwire
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  knotwire-pgdata:
+  knotwire-miniodata:

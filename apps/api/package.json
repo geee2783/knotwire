@@ -1,0 +1,16 @@
+{
+  "name": "@knotwire/api",
+  "version": "0.1.0",
+  "description": "Knotwire public API (M0: health/readiness; milestones grow this service).",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "npm run build && node --watch dist/server.js",
+    "test": "npm run build && node --test dist/"
+  },
+  "dependencies": {
+    "@knotwire/core": "file:../core"
+  }
+}

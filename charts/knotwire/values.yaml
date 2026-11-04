@@ -1,0 +1,34 @@
+# Knotwire - GNU AGPL-3.0-only. See LICENSE in the repository root.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/knotwire/knotwire-api
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  # Prefer a Kubernetes Secret with keys DATABASE_URL and REDIS_URL.
+  secretName: knotwire-env
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  tls: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+tailscale:
+  enabled: false
+  # When enabled, the chart annotates the Service for Tailscale API-server proxying
+  # or expects the Tailscale operator; see docs/self-host.md (M6).
