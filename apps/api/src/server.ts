@@ -14,12 +14,15 @@ import {
   type Pool,
 } from "@knotwire/core";
 import {
-  authenticate,
+  authenticateApi,
   readJson,
   readBody,
   sendJson,
   sendError,
+  requireManagerRole,
 } from "./context.js";
+import { rateLimiterFromEnv, logRequest, issueApiKey } from "./safety.js";
+import { withTenant } from "@knotwire/core";
 import {
   listPipelines,
   createPipeline,
@@ -104,7 +107,7 @@ import {
 import type { FakeWhatsAppClient } from "./whatsapp.js";
 import type { FakeMessengerClient } from "./facebook.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "1.0.0";
 
 export interface ApiOptions {
   databaseUrl?: string | null | undefined;
@@ -142,11 +145,18 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
   const fakeWhatsAppClients = new Map<string, FakeWhatsAppClient>();
   const fakeMessengerClients = new Map<string, FakeMessengerClient>();
   const runtimeClients: RuntimeClients = { whatsapp: fakeWhatsAppClients, messenger: fakeMessengerClients };
+  const rateLimiter = rateLimiterFromEnv();
 
   const handler = async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
     const method = req.method ?? "GET";
+    const startedAt = Date.now();
+    let tenantForLog: string | undefined;
+    let userForLog: string | undefined;
+    res.on("finish", () => {
+      logRequest({ method, path, status: res.statusCode, durationMs: Date.now() - startedAt, tenantId: tenantForLog, userId: userForLog });
+    });
 
     try {
       if (method === "GET" && path === "/healthz") {
@@ -183,14 +193,24 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
         return;
       }
 
-      const ctx = authenticate(req, jwtSecret);
+      const ctx = pool ? await authenticateApi(req, jwtSecret, pool) : null;
       if (!ctx) {
-        sendError(res, 401, "unauthorized", "missing or invalid Bearer token");
+        sendError(res, 401, "unauthorized", "missing or invalid Bearer token / API key");
         return;
       }
+      tenantForLog = ctx.tenantId;
+      userForLog = ctx.userId;
 
       if (!pool) {
         sendJson(res, 503, { error: "database_unavailable" });
+        return;
+      }
+
+      // per-tenant rate limiting (global per process; Redis in post-v1)
+      const rl = rateLimiter.check(ctx.tenantId);
+      if (!rl.allowed) {
+        res.setHeader("retry-after", String(rl.retryAfterSeconds));
+        sendError(res, 429, "rate_limited", `retry after ${rl.retryAfterSeconds}s`);
         return;
       }
 
@@ -362,6 +382,35 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
       // Dialog engine
       if (method === "GET" && path === "/api/v1/dialogs") return finish(listDialogs(pool, ctx));
       if (method === "POST" && path === "/api/v1/dialogs") return finish(createDialog(pool, ctx, await readJson(req)));
+      // API keys (management)
+      if (method === "GET" && path === "/api/v1/api-keys") {
+        const rows = await withTenant(pool, ctx.tenantId, async (c) => {
+          const r = await c.query("SELECT id, label, prefix, role, active, last_used_at, created_at FROM api_keys ORDER BY created_at DESC");
+          return r.rows;
+        });
+        return finish(Promise.resolve({ status: 200, body: { keys: rows } }));
+      }
+      if (method === "POST" && path === "/api/v1/api-keys") {
+        if (!requireManagerRole(ctx)) return finish(Promise.resolve({ status: 403, body: { error: "forbidden" } }));
+        const body = await readJson(req);
+        const label = typeof body["label"] === "string" && body["label"].trim() ? String(body["label"]).trim().slice(0, 200) : "key";
+        const role = typeof body["role"] === "string" ? String(body["role"]) : "agent";
+        const created = await issueApiKey(pool, ctx, label, role);
+        if (!created) return finish(Promise.resolve({ status: 400, body: { error: "invalid_role" } }));
+        return finish(Promise.resolve({ status: 201, body: { ...created, note: "store the plaintext now; it is never shown again" } }));
+      }
+      {
+        const m = /^\/api\/v1\/api-keys\/([^/]+)$/.exec(path);
+        if (m && method === "DELETE" && UUID_RE.test(m[1]!)) {
+          if (!requireManagerRole(ctx)) return finish(Promise.resolve({ status: 403, body: { error: "forbidden" } }));
+          const removed = await withTenant(pool, ctx.tenantId, async (c) => {
+            const r = await c.query("UPDATE api_keys SET active=false WHERE id=$1 AND active=true RETURNING id", [m[1]!]);
+            return r.rowCount !== null && r.rowCount > 0;
+          });
+          if (!removed) return finish(Promise.resolve({ status: 404, body: { error: "api_key_not_found" } }));
+          return finish(Promise.resolve({ status: 200, body: { revoked: true, id: m[1] } }));
+        }
+      }
       {
         const m = /^\/api\/v1\/dialogs\/([^/]+)(?:\/(triggers|sessions|publish|simulate|launch))?$/.exec(path);
         if (m && UUID_RE.test(m[1]!)) {

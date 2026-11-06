@@ -18,8 +18,17 @@ export function sendJson(res: ServerResponse, status: number, body: unknown): vo
     "content-type": "application/json; charset=utf-8",
     "content-length": String(payload.length),
     "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
   });
   res.end(payload);
+}
+
+export function securityHeaders(res: ServerResponse): void {
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("x-frame-options", "DENY");
+  res.setHeader("referrer-policy", "no-referrer");
 }
 
 export function sendError(res: ServerResponse, status: number, code: string, message?: string): void {
@@ -66,6 +75,22 @@ export function authenticate(req: IncomingMessage, jwtSecret: string): RequestCo
   } catch {
     return null;
   }
+}
+
+/** Authenticate via JWT Bearer or X-Api-Key (async variant used by the server). */
+export async function authenticateApi(
+  req: IncomingMessage,
+  jwtSecret: string,
+  pool: import("pg").Pool,
+): Promise<RequestContext | null> {
+  const jwt = authenticate(req, jwtSecret);
+  if (jwt) return jwt;
+  const apiKey = req.headers["x-api-key"];
+  if (typeof apiKey === "string" && apiKey.startsWith("knot_live_")) {
+    const { validateApiKey } = await import("./safety.js");
+    return validateApiKey(pool, apiKey);
+  }
+  return null;
 }
 
 export function requireWriteRole(ctx: RequestContext): boolean {

@@ -1,0 +1,34 @@
+# Knotwire — GNU AGPL-3.0-only. See LICENSE in the repository root.
+# Tailscale profile: expose the API on your tailnet (private) or, optionally,
+# to the public internet via Tailscale Funnel (operator opt-in only).
+#
+# Usage (Docker):
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --profile tailscale up -d
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml --profile tailscale exec tailscale serve-node
+#   # then run the printed command, e.g.
+#   tailscale serve --hostname=knotwire --https=443 http://127.0.0.1:8080
+#
+# ACL (Tailscale admin console): allow your devices/users to reach the node on
+# port 8080 (or 443 through serve). Funnel (`tailscale funnel`) is public
+# HTTPS — only when the operator explicitly wants it.
+#
+# Zero inbound ports are opened on the host; the tailnet is the transport.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    profiles: ["tailscale"]
+    network_mode: host
+    cap_add: ["NET_ADMIN", "NET_RAW"]
+    env_file:
+      - .env
+    environment:
+      TS_USERSPACE: "false"
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    command: --cleanup --advertise-exit-node=false --snat-subnet-routes=false
+
+volumes:
+  tailscale-state:

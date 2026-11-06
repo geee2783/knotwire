@@ -28,7 +28,7 @@ test("GET /healthz returns ok with version", async () => {
     assert.equal(res.status, 200);
     const body = (await res.json()) as { status: string; version: string };
     assert.equal(body.status, "ok");
-    assert.equal(body.version, "0.2.0");
+    assert.equal(body.version, "1.0.0");
   });
 });
 

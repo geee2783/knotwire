@@ -5,7 +5,9 @@ pipelines & leads, a unified WhatsApp / Messenger inbox, a deterministic dialog
 engine, an AI agent with pluggable models, and a fully documented public API —
 all on your infrastructure, with your data.
 
-**Status: M0 (foundations). Not feature-complete. Do not use in production.**
+**Status: v1.0.0 — first stable ("First to production"). See RELEASE-v1.md.**
+Previous milestones: M0 foundations, M1 core CRM, M2 WhatsApp inbox, M3 Facebook
+pipeline, M4 dialog engine, M5 AI agent, M6 hardening + Tailscale.
 
 ## Principles
 
