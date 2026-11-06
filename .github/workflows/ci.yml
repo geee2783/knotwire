@@ -1,3 +1,4 @@
+# Knotwire — GNU AGPL-3.0-only. See LICENSE in the repository root.
 name: knotwire
 on:
   push:
@@ -7,6 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: knotwire
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://knotwire_app:knotwire-app-pw@localhost:5432/knotwire
+      SUPERUSER_DATABASE_URL: postgres://postgres:postgres@localhost:5432/knotwire
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,6 +31,7 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
+      - run: node scripts/db-setup.mjs
       - run: npm run typecheck
       - run: npm test
 
@@ -24,12 +42,12 @@ jobs:
       - name: Every source file carries the AGPL notice
         run: |
           set -e
-          files=$(git ls-files '*.ts' '*.js' '*.sql' '*.yaml' '*.yml' Dockerfile NOTICE TRADEMARK.md)
+          files=$(git ls-files '*.ts' '*.js' '*.sql' '*.yaml' '*.yml' '*.mjs' Dockerfile NOTICE TRADEMARK.md)
           for f in $files; do
             case "$f" in
               node_modules/*|charts/*/templates/*) continue;;
             esac
-            grep -q -E 'AGPL|LICENSE' "$f" || { echo "missing notice: $f"; exit 1; }
+            grep -q -E 'AGPL|LICENSE|GNU Affero' "$f" || { echo "missing notice: $f"; exit 1; }
           done
 
   compose:

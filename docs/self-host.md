@@ -11,8 +11,14 @@ npm install && npm test
 npm run dev    # http://localhost:8080/healthz
 ```
 
-Migrations (M0 kit): `psql $DATABASE_URL -f packages/core/migrations/0001_tenant_rls.sql`
-(Run per tenant bootstrap in M1; M0 migration is idempotent.)
+Migrations (run once, as superuser; the app role is least-privilege):
+```bash
+SUPERUSER_DATABASE_URL='postgres://postgres:pw@127.0.0.1:5432/knotwire' APP_ROLE_PASSWORD='<app-role-pw>' npm run db:setup
+```
+This creates the `knotwire_app` role (RLS enforced), grants, and applies
+`packages/core/migrations/` in order. The API boots with `DATABASE_URL`
+pointing at the app role and does **not** attempt migrations at startup
+(set `KNOTWIRE_APPLY_MIGRATIONS=true` only for single-user dev environments).
 
 ## Option B — Helm (M0 skeleton)
 See `charts/knotwire/templates/NOTES.txt`. Provide Kubernetes Secret

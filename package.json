@@ -13,7 +13,8 @@
     "dev": "npm run dev -w @knotwire/api",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:setup": "node scripts/db-setup.mjs"
   },
   "engines": {
     "node": ">=24"
@@ -21,6 +22,12 @@
   "packageManager": "npm@11.20.0",
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "embedded-postgres": "18.6.0-beta.19",
+    "pg": "8.23.1",
     "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@18.6.0-beta.19": true
   }
 }
