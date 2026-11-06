@@ -172,7 +172,7 @@ export async function updateStage(pool: pg.Pool, ctx: RequestContext, stageId: s
 // ---------- leads ----------
 
 const LEAD_SELECT = `SELECT id, pipeline_id, stage_id, name, price, responsible_user_id, source_id,
-  contact_id, company_id, custom_fields, tags, incoming, outcome, closed_at, created_at, updated_at FROM leads`;
+  contact_id, company_id, custom_fields, tags, incoming, outcome, closed_at, source_kind, source_ref, created_at, updated_at FROM leads`;
 
 export async function listLeads(pool: pg.Pool, ctx: RequestContext, url: URL): Promise<HandlerResult> {
   const params: unknown[] = [];

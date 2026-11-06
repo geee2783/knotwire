@@ -68,7 +68,14 @@ import {
   submitTemplate,
   inboxPage,
 } from "./routes-inbox.js";
+import {
+  connectMessenger,
+  ingestMessengerWebhook,
+  ingestLeadgenWebhook,
+  attributionStats,
+} from "./routes-fb.js";
 import type { FakeWhatsAppClient } from "./whatsapp.js";
+import type { FakeMessengerClient } from "./facebook.js";
 
 export const VERSION = "0.2.0";
 
@@ -102,9 +109,11 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
   }
   const pool = databaseUrl ? connect(databaseUrl) : null;
   const startWorker = options.startWebhookWorker ?? false;
-  // Per-tenant fake WhatsApp clients (sends recorded in-memory). The real Cloud
-  // API client replaces these once credentials are configured (M2 gate).
+  // Per-tenant fake provider clients (real Meta providers replace these once
+  // credentials are configured — M2/M3 gates).
   const fakeWhatsAppClients = new Map<string, FakeWhatsAppClient>();
+  const fakeMessengerClients = new Map<string, FakeMessengerClient>();
+  void fakeMessengerClients;
 
   const handler = async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -291,6 +300,49 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
           }
         }
       }
+
+      // Facebook (Messenger + lead forms)
+      if (method === "GET" && path === "/api/v1/channels/facebook/webhook") {
+        const mode = url.searchParams.get("hub.mode");
+        const token = url.searchParams.get("hub.verify_token");
+        const challenge = url.searchParams.get("hub.challenge");
+        if (mode === "subscribe" && token && challenge) {
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end(challenge);
+          return;
+        }
+        sendError(res, 400, "invalid_challenge");
+        return;
+      }
+      if (method === "POST" && path === "/api/v1/channels/facebook/webhook") {
+        const raw = await readBody(req, 1024 * 1024);
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        } catch {
+          sendError(res, 400, "invalid_json");
+          return;
+        }
+        const sigHeader = req.headers["x-hub-signature-256"];
+        return finish(ingestMessengerWebhook(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader));
+      }
+      if (method === "POST" && path === "/api/v1/channels/facebook/accounts") {
+        if (process.env["NODE_ENV"] === "production") return sendError(res, 404, "not_found");
+        return finish(connectMessenger(pool, ctx, await readJson(req)));
+      }
+      if (method === "POST" && path === "/api/v1/channels/facebook/lead-forms/webhook") {
+        const raw = await readBody(req, 1024 * 1024);
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        } catch {
+          sendError(res, 400, "invalid_json");
+          return;
+        }
+        const sigHeader = req.headers["x-hub-signature-256"];
+        return finish(ingestLeadgenWebhook(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader));
+      }
+      if (method === "GET" && path === "/api/v1/attribution") return finish(attributionStats(pool, ctx, url));
 
       // CSV
       if (method === "GET" && path === "/api/v1/export/leads.csv") {
