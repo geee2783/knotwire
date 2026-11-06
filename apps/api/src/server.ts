@@ -16,6 +16,7 @@ import {
 import {
   authenticate,
   readJson,
+  readBody,
   sendJson,
   sendError,
 } from "./context.js";
@@ -52,6 +53,22 @@ import {
   importLeadsCsv,
 } from "./routes-misc.js";
 import { KNOTWIRE_OPENAPI } from "./openapi.js";
+import {
+  connectChannel,
+  listChannels,
+  ingestInbound,
+  injectFakeInbound,
+  listConversations,
+  getConversation,
+  sendMessage,
+  addInternalNote,
+  setConversationState,
+  listTemplates,
+  registerTemplate,
+  submitTemplate,
+  inboxPage,
+} from "./routes-inbox.js";
+import type { FakeWhatsAppClient } from "./whatsapp.js";
 
 export const VERSION = "0.2.0";
 
@@ -85,6 +102,9 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
   }
   const pool = databaseUrl ? connect(databaseUrl) : null;
   const startWorker = options.startWebhookWorker ?? false;
+  // Per-tenant fake WhatsApp clients (sends recorded in-memory). The real Cloud
+  // API client replaces these once credentials are configured (M2 gate).
+  const fakeWhatsAppClients = new Map<string, FakeWhatsAppClient>();
 
   const handler = async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -103,6 +123,15 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
         }
         await pool.query("SELECT 1");
         sendJson(res, 200, { status: "ready", database: "ok" });
+        return;
+      }
+
+      // Minimal inbox UI (server-rendered; no auth required to load the page,
+      // the page's fetches are authenticated).
+      if (method === "GET" && path === "/inbox") {
+        const html = inboxPage();
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+        res.end(html);
         return;
       }
 
@@ -200,6 +229,67 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
       {
         const m = /^\/api\/v1\/webhooks\/([^/]+)\/test$/.exec(path);
         if (m && method === "POST" && UUID_RE.test(m[1]!)) return finish(testWebhook(pool, ctx, m[1]!));
+      }
+
+      // WhatsApp + inbox
+      if (method === "GET" && path === "/api/v1/channels/whatsapp/webhook") {
+        const mode = url.searchParams.get("hub.mode");
+        const token = url.searchParams.get("hub.verify_token");
+        const challenge = url.searchParams.get("hub.challenge");
+        if (mode === "subscribe" && token && challenge) {
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end(challenge);
+          return;
+        }
+        sendError(res, 400, "invalid_challenge");
+        return;
+      }
+      if (method === "POST" && path === "/api/v1/channels/whatsapp/webhook") {
+        const raw = await readBody(req, 1024 * 1024);
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        } catch {
+          sendError(res, 400, "invalid_json");
+          return;
+        }
+        const sigHeader = req.headers["x-hub-signature-256"];
+        return finish(
+          ingestInbound(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader, fakeWhatsAppClients),
+        );
+      }
+      if (method === "POST" && path === "/api/v1/channels/whatsapp/accounts") {
+        if (process.env["NODE_ENV"] === "production") return sendError(res, 404, "not_found");
+        return finish(connectChannel(pool, ctx, await readJson(req)));
+      }
+      if (method === "GET" && path === "/api/v1/channels/whatsapp/accounts") return finish(listChannels(pool, ctx));
+      if (method === "POST" && path === "/api/v1/channels/whatsapp/dev/fake-inbound") {
+        if (process.env["NODE_ENV"] === "production") return sendError(res, 404, "not_found");
+        return finish(injectFakeInbound(pool, ctx, await readJson(req)));
+      }
+      if (method === "GET" && path === "/api/v1/conversations") return finish(listConversations(pool, ctx, url));
+      if (method === "GET" && path === "/api/v1/templates") return finish(listTemplates(pool, ctx));
+      if (method === "POST" && path === "/api/v1/templates") return finish(registerTemplate(pool, ctx, await readJson(req)));
+      {
+        const m = /^\/api\/v1\/templates\/([^/]+)\/submit$/.exec(path);
+        if (m && method === "POST" && UUID_RE.test(m[1]!)) return finish(submitTemplate(pool, ctx, m[1]!));
+      }
+      {
+        const m = /^\/api\/v1\/conversations\/([^/]+)(?:\/(messages|internal-notes|close|reopen|assign|opt-out))?$/.exec(path);
+        if (m && UUID_RE.test(m[1]!)) {
+          const convId = m[1]!;
+          const sub = m[2];
+          if (method === "GET" && !sub) return finish(getConversation(pool, ctx, convId));
+          if (method === "POST" && sub === "messages") {
+            return finish(sendMessage(pool, ctx, convId, await readJson(req), fakeWhatsAppClients));
+          }
+          if (method === "POST" && sub === "internal-notes") {
+            return finish(addInternalNote(pool, ctx, convId, await readJson(req)));
+          }
+          if (method === "POST" && (sub === "close" || sub === "reopen" || sub === "assign" || sub === "opt-out")) {
+            return finish(setConversationState(pool, ctx, convId, sub, (await readJson(req).catch(() => ({}))) as Record<string, unknown>));
+          }
+        }
       }
 
       // CSV
