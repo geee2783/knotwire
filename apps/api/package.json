@@ -5,8 +5,8 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run build -w @knotwire/core && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @knotwire/core && tsc --noEmit -p tsconfig.json",
     "dev": "npm run build && node --watch dist/server.js",
     "test": "npm run build && node --test dist/"
   },
