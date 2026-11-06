@@ -74,6 +74,22 @@ import {
   ingestLeadgenWebhook,
   attributionStats,
 } from "./routes-fb.js";
+import {
+  listDialogs,
+  createDialog,
+  getDialog,
+  updateDialog,
+  publishDialog,
+  listTriggers,
+  addTrigger,
+  listSessions,
+  simulate,
+  launch,
+  onLeadCreated,
+  onInboundMessage,
+  onStageChanged,
+  type RuntimeClients,
+} from "./routes-dialog.js";
 import type { FakeWhatsAppClient } from "./whatsapp.js";
 import type { FakeMessengerClient } from "./facebook.js";
 
@@ -110,10 +126,11 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
   const pool = databaseUrl ? connect(databaseUrl) : null;
   const startWorker = options.startWebhookWorker ?? false;
   // Per-tenant fake provider clients (real Meta providers replace these once
-  // credentials are configured — M2/M3 gates).
+  // credentials are configured — M2/M3 gates). Runtime dialogs share the maps
+  // so transcripts flow through the same fakes.
   const fakeWhatsAppClients = new Map<string, FakeWhatsAppClient>();
   const fakeMessengerClients = new Map<string, FakeMessengerClient>();
-  void fakeMessengerClients;
+  const runtimeClients: RuntimeClients = { whatsapp: fakeWhatsAppClients, messenger: fakeMessengerClients };
 
   const handler = async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -185,13 +202,27 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
 
       // leads
       if (method === "GET" && path === "/api/v1/leads") return finish(listLeads(pool, ctx, url));
-      if (method === "POST" && path === "/api/v1/leads") return finish(createLead(pool, ctx, await readJson(req)));
+      if (method === "POST" && path === "/api/v1/leads") {
+        const result = await createLead(pool, ctx, await readJson(req));
+        if (result.status === 201) {
+          await onLeadCreated(pool, ctx, { leadId: (result.body as { id: string }).id }, runtimeClients).catch(() => undefined);
+        }
+        sendJson(res, result.status, result.body);
+        return;
+      }
       {
         const m = /^\/api\/v1\/leads\/([^/]+)$/.exec(path);
         if (m && UUID_RE.test(m[1]!)) {
           const id = m[1]!;
           if (method === "GET") return finish(getLead(pool, ctx, id));
-          if (method === "PATCH") return finish(updateLead(pool, ctx, id, await readJson(req)));
+          if (method === "PATCH") {
+            const result = await updateLead(pool, ctx, id, await readJson(req));
+            if (result.status === 200 && (result.body as { stage_id?: string }).stage_id) {
+              await onStageChanged(pool, ctx, { leadId: id }, runtimeClients).catch(() => undefined);
+            }
+            sendJson(res, result.status, result.body);
+            return;
+          }
           if (method === "DELETE") return finish(deleteLead(pool, ctx, id));
         }
       }
@@ -264,7 +295,9 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
         }
         const sigHeader = req.headers["x-hub-signature-256"];
         return finish(
-          ingestInbound(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader, fakeWhatsAppClients),
+          ingestInbound(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader, fakeWhatsAppClients, async (info) => {
+            await onInboundMessage(pool, ctx, { conversationId: info.conversationId, messageText: info.text }, runtimeClients).catch(() => undefined);
+          }),
         );
       }
       if (method === "POST" && path === "/api/v1/channels/whatsapp/accounts") {
@@ -298,6 +331,25 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
           if (method === "POST" && (sub === "close" || sub === "reopen" || sub === "assign" || sub === "opt-out")) {
             return finish(setConversationState(pool, ctx, convId, sub, (await readJson(req).catch(() => ({}))) as Record<string, unknown>));
           }
+        }
+      }
+
+      // Dialog engine
+      if (method === "GET" && path === "/api/v1/dialogs") return finish(listDialogs(pool, ctx));
+      if (method === "POST" && path === "/api/v1/dialogs") return finish(createDialog(pool, ctx, await readJson(req)));
+      {
+        const m = /^\/api\/v1\/dialogs\/([^/]+)(?:\/(triggers|sessions|publish|simulate|launch))?$/.exec(path);
+        if (m && UUID_RE.test(m[1]!)) {
+          const botId = m[1]!;
+          const sub = m[2];
+          if (!sub && method === "GET") return finish(getDialog(pool, ctx, botId));
+          if (!sub && method === "PUT") return finish(updateDialog(pool, ctx, botId, await readJson(req)));
+          if (sub === "triggers" && method === "GET") return finish(listTriggers(pool, ctx, botId));
+          if (sub === "triggers" && method === "POST") return finish(addTrigger(pool, ctx, botId, await readJson(req)));
+          if (sub === "sessions" && method === "GET") return finish(listSessions(pool, ctx, botId));
+          if (sub === "publish" && method === "POST") return finish(publishDialog(pool, ctx, botId));
+          if (sub === "simulate" && method === "POST") return finish(simulate(pool, ctx, botId, await readJson(req)));
+          if (sub === "launch" && method === "POST") return finish(launch(pool, ctx, botId, await readJson(req), runtimeClients));
         }
       }
 

@@ -53,12 +53,14 @@ export interface DeliveryReport {
 }
 
 async function deliverTenantDue(client: pg.PoolClient, limit: number): Promise<DeliveryReport> {
+  // SELECT ... FOR UPDATE SKIP LOCKED: concurrent workers (parallel tests,
+  // multi-instance deploys) must not fetch the same pending delivery twice.
   const { rows } = await client.query(
     `SELECT d.id, d.webhook_id, d.body, d.attempts, w.url, w.secret
      FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id
      WHERE d.status = 'pending' AND d.next_attempt_at <= now()
      ORDER BY d.created_at
-     LIMIT $1`,
+     LIMIT $1 FOR UPDATE OF d SKIP LOCKED`,
     [limit],
   );
   const report: DeliveryReport = { delivered: 0, retried: 0, exhausted: 0 };

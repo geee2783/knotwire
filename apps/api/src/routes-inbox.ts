@@ -65,7 +65,7 @@ async function lastInboundAt(client: pg.PoolClient, conversationId: string): Pro
   return ts ? new Date(ts) : null;
 }
 
-async function recordMessage(
+export async function recordMessage(
   client: pg.PoolClient,
   ctx: RequestContext,
   input: {
@@ -146,6 +146,7 @@ export async function ingestInbound(
   rawBody: string,
   signatureHeader: string | undefined,
   fakeClients: Map<string, FakeWhatsAppClient>,
+  onStored?: ((info: { conversationId: string; text: string | undefined }) => Promise<void>) | undefined,
 ): Promise<HandlerResult> {
   // HMAC over raw bytes using the channel verify_token (access-token bound
   // in Meta's setup; we bind to verify_token for the dev path and document
@@ -186,6 +187,9 @@ export async function ingestInbound(
     created.push(conversation.message);
   }
   void fakeClients;
+  for (const item of created) {
+    if (onStored && item["conversation_id"]) await onStored({ conversationId: String(item["conversation_id"]), text: (item["body"] as string | null) ?? undefined }).catch(() => undefined);
+  }
   return { status: 200, body: { accepted: created.length } };
 }
 
