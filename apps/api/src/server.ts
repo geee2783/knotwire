@@ -90,6 +90,17 @@ import {
   onStageChanged,
   type RuntimeClients,
 } from "./routes-dialog.js";
+import {
+  listAgents,
+  createAgent,
+  publishAgent,
+  listSources,
+  addSource,
+  onAiMessage,
+  copilotSummarize,
+  copilotRewrite,
+  copilotSuggestReply,
+} from "./routes-ai.js";
 import type { FakeWhatsAppClient } from "./whatsapp.js";
 import type { FakeMessengerClient } from "./facebook.js";
 
@@ -297,6 +308,7 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
         return finish(
           ingestInbound(pool, ctx, body, raw.toString("utf8"), Array.isArray(sigHeader) ? sigHeader[0] : sigHeader, fakeWhatsAppClients, async (info) => {
             await onInboundMessage(pool, ctx, { conversationId: info.conversationId, messageText: info.text }, runtimeClients).catch(() => undefined);
+            await onAiMessage(pool, ctx, { conversationId: info.conversationId, messageText: info.text }, runtimeClients).catch(() => undefined);
           }),
         );
       }
@@ -332,6 +344,19 @@ export function createApi(options: ApiOptions = {}): ApiHandle {
             return finish(setConversationState(pool, ctx, convId, sub, (await readJson(req).catch(() => ({}))) as Record<string, unknown>));
           }
         }
+      }
+
+      // AI agents + copilot
+      if (method === "GET" && path === "/api/v1/ai/agents") return finish(listAgents(pool, ctx));
+      if (method === "POST" && path === "/api/v1/ai/agents") return finish(createAgent(pool, ctx, await readJson(req)));
+      if (method === "GET" && path === "/api/v1/ai/sources") return finish(listSources(pool, ctx));
+      if (method === "POST" && path === "/api/v1/ai/sources") return finish(addSource(pool, ctx, await readJson(req)));
+      if (method === "POST" && path === "/api/v1/ai/copilot/summary") return finish(copilotSummarize(pool, ctx, await readJson(req)));
+      if (method === "POST" && path === "/api/v1/ai/copilot/rewrite") return finish(copilotRewrite(pool, ctx, await readJson(req)));
+      if (method === "POST" && path === "/api/v1/ai/copilot/suggest-reply") return finish(copilotSuggestReply(pool, ctx, await readJson(req)));
+      {
+        const m = /^\/api\/v1\/ai\/agents\/([^/]+)\/publish$/.exec(path);
+        if (m && method === "POST" && UUID_RE.test(m[1]!)) return finish(publishAgent(pool, ctx, m[1]!));
       }
 
       // Dialog engine
